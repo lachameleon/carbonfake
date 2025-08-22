@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Minecraft Chat Line Builder</title>
+  <style>
+    :root{
+      --bg:#0b0f14;--panel:#121821;--muted:#8aa0b4;--text:#e6edf3;--accent:#6ee7ff;--ring:#2b3b4d
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#0b0f14,#0a0c10);color:var(--text);min-height:100vh;display:grid;place-items:start}
+    .wrap{width:min(1100px,92vw);margin:32px auto;display:grid;gap:16px}
+    h1{font-size:clamp(18px,3vw,24px);margin:0 0 6px;letter-spacing:.3px}
+    .card{background:var(--panel);border:1px solid var(--ring);border-radius:16px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.3)}
+    .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    label{font-size:12px;color:var(--muted);display:block;margin:0 0 6px}
+    input[type="text"],select{width:100%;background:#0e141c;border:1px solid #1b2735;color:var(--text);padding:10px 12px;border-radius:12px;outline:none}
+    input[type="text"]:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(110,231,255,.15)}
+    .actions{display:flex;flex-wrap:wrap;gap:8px}
+    button{background:#1a2533;border:1px solid #243345;color:var(--text);padding:10px 14px;border-radius:12px;cursor:pointer}
+    button:hover{border-color:var(--accent)}
+    .preview{font-family:"JetBrains Mono",Consolas,Menlo,monospace;background:#0a0f15;border:1px dashed #223042;padding:14px;border-radius:12px}
+    .mc{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+    .mc span{white-space:pre}
+    .out{display:grid;gap:8px}
+    .small{font-size:12px;color:var(--muted)}
+    .kbd{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0d1520;border:1px solid #203044;border-radius:6px;padding:2px 6px;font-size:12px}
+    @media (max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media (max-width:560px){.grid,.row{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Minecraft Chat Line Builder</h1>
+    <div class="card">
+      <p class="small">Build lines like <span class="kbd">§bStarscope_RC §4-&gt; §bme: §3test</span>. Choose colors, edit names/content, then copy the generated string with <span class="kbd">§</span> codes.</p>
+      <div class="grid" id="controls"></div>
+      <div class="actions" style="margin-top:12px">
+        <button id="copySection">Copy §-coded</button>
+        <button id="copyAmp">Copy &amp;-coded</button>
+        <button id="reset">Reset to Example</button>
+      </div>
+    </div>
+
+    <div class="card out">
+      <div>
+        <label>Live Preview (colors rendered)</label>
+        <div class="preview mc" id="preview"></div>
+      </div>
+      <div>
+        <label>Generated Output</label>
+        <div class="preview" id="output"></div>
+        <div class="small">Tip: Most servers accept <span class="kbd">&amp;</span> instead of <span class="kbd">§</span>. Use the other copy button if you need that variant.</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Minecraft color map
+    const COLORS = [
+      {c:'0',name:'Black',hex:'#000000'},{c:'1',name:'Dark Blue',hex:'#0000AA'},
+      {c:'2',name:'Dark Green',hex:'#00AA00'},{c:'3',name:'Dark Aqua',hex:'#00AAAA'},
+      {c:'4',name:'Dark Red',hex:'#AA0000'},{c:'5',name:'Dark Purple',hex:'#AA00AA'},
+      {c:'6',name:'Gold',hex:'#FFAA00'},{c:'7',name:'Gray',hex:'#AAAAAA'},
+      {c:'8',name:'Dark Gray',hex:'#555555'},{c:'9',name:'Blue',hex:'#5555FF'},
+      {c:'a',name:'Green',hex:'#55FF55'},{c:'b',name:'Aqua',hex:'#55FFFF'},
+      {c:'c',name:'Red',hex:'#FF5555'},{c:'d',name:'Light Purple',hex:'#FF55FF'},
+      {c:'e',name:'Yellow',hex:'#FFFF55'},{c:'f',name:'White',hex:'#FFFFFF'}
+    ];
+
+    // UI schema
+    const FIELDS = [
+      {key:'senderName', label:'Sender Name', type:'text', placeholder:'Starscope_RC', def:'Starscope_RC'},
+      {key:'senderColor', label:'Sender Color', type:'color', def:'b'},
+      {key:'arrowText', label:'Arrow', type:'text', placeholder:'->', def:'->'},
+      {key:'arrowColor', label:'Arrow Color', type:'color', def:'4'},
+      {key:'recipientName', label:'Recipient Name', type:'text', placeholder:'me', def:'me'},
+      {key:'recipientColor', label:'Recipient Color', type:'color', def:'b'},
+      {key:'separator', label:'Separator (after recipient)', type:'text', placeholder:':', def:':'},
+      {key:'messageColor', label:'Message Color', type:'color', def:'3'},
+      {key:'messageText', label:'Message Text', type:'text', placeholder:'test', def:'test'},
+    ];
+
+    const state = {};
+
+    function el(tag, attrs={}, children=[]) {
+      const n = document.createElement(tag);
+      for (const [k,v] of Object.entries(attrs)) {
+        if (k === 'class') n.className = v;
+        else if (k === 'for') n.htmlFor = v;
+        else if (k.startsWith('on')) n.addEventListener(k.substring(2), v);
+        else n.setAttribute(k, v);
+      }
+      for (const c of children) n.append(c.nodeType ? c : document.createTextNode(c));
+      return n;
+    }
+
+    function colorSelect(id, def) {
+      const s = el('select', {id});
+      COLORS.forEach(({c,name})=>{
+        const opt = el('option', {value:c});
+        opt.textContent = `§${c} — ${name}`;
+        s.append(opt);
+      });
+      s.value = def;
+      s.addEventListener('change', update);
+      return s;
+    }
+
+    function buildControls(){
+      const wrap = document.getElementById('controls');
+      wrap.innerHTML = '';
+      FIELDS.forEach(f => {
+        const id = 'f_'+f.key;
+        let ctl;
+        if (f.type === 'text') {
+          ctl = el('input', {id, type:'text', placeholder:f.placeholder || '', value: state[f.key] ?? f.def});
+          ctl.addEventListener('input', update);
+        } else if (f.type === 'color') {
+          ctl = colorSelect(id, state[f.key] ?? f.def);
+        }
+        wrap.append(
+          el('div', {}, [
+            el('label', {for:id}, [f.label]),
+            ctl
+          ])
+        );
+      });
+    }
+
+    function getHex(c){
+      return COLORS.find(x=>x.c===c)?.hex || '#ffffff';
+    }
+
+    function sanitize(text){
+      return (text||'').replace(/\s+/g, ' ').trim();
+    }
+
+    function compose(){
+      const sName = sanitize(document.getElementById('f_senderName').value);
+      const sCol  = document.getElementById('f_senderColor').value;
+      const arrow = sanitize(document.getElementById('f_arrowText').value || '->');
+      const aCol  = document.getElementById('f_arrowColor').value;
+      const rName = sanitize(document.getElementById('f_recipientName').value);
+      const rCol  = document.getElementById('f_recipientColor').value;
+      const sep   = sanitize(document.getElementById('f_separator').value || ':');
+      const mCol  = document.getElementById('f_messageColor').value;
+      const msg   = document.getElementById('f_messageText').value ?? '';
+
+      const out = `§${sCol}${sName} §${aCol}${arrow} §${rCol}${rName}${sep} §${mCol}${msg}`;
+      return { sName, sCol, arrow, aCol, rName, rCol, sep, mCol, msg, out };
+    }
+
+    function renderPreview(parts){
+      const p = document.getElementById('preview');
+      p.innerHTML = '';
+      const chunks = [
+        {text: parts.sName, col:getHex(parts.sCol)},
+        {text: ' ', col:null},
+        {text: parts.arrow, col:getHex(parts.aCol)},
+        {text: ' ', col:null},
+        {text: parts.rName + parts.sep + ' ', col:getHex(parts.rCol)},
+        {text: parts.msg, col:getHex(parts.mCol)}
+      ];
+      chunks.forEach(ch=>{
+        const span = el('span');
+        if (ch.col) span.style.color = ch.col;
+        span.textContent = ch.text;
+        p.append(span);
+      });
+    }
+
+    function update(){
+      const parts = compose();
+      document.getElementById('output').textContent = parts.out;
+      renderPreview(parts);
+      // persist to hash
+      const payload = encodeURIComponent(JSON.stringify(parts));
+      history.replaceState(null,'', '#'+payload);
+    }
+
+    function copy(text){
+      navigator.clipboard.writeText(text).then(()=>{
+        const b = document.activeElement;
+        if (b && b.tagName==='BUTTON') {
+          const t = b.textContent; b.textContent = 'Copied!'; setTimeout(()=>b.textContent=t,900);
+        }
+      });
+    }
+
+    function loadFromHash(){
+      try{
+        if (location.hash.length>1){
+          const data = JSON.parse(decodeURIComponent(location.hash.slice(1)));
+          FIELDS.forEach(f=>{ if (f.key in data) state[f.key] = data[f.key]; });
+        }
+      }catch{ /* ignore */ }
+    }
+
+    // Init
+    loadFromHash();
+    buildControls();
+    update();
+
+    // Buttons
+    document.getElementById('copySection').onclick = ()=> copy(document.getElementById('output').textContent);
+    document.getElementById('copyAmp').onclick = ()=> copy(document.getElementById('output').textContent.replaceAll('§','&'));
+    document.getElementById('reset').onclick = ()=>{
+      location.hash = '';
+      FIELDS.forEach(f=> delete state[f.key]);
+      buildControls();
+      update();
+    };
+  </script>
+</body>
+</html>
